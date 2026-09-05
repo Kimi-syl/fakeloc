@@ -78,12 +78,7 @@ class MockLocationManager(private val context: Context) {
     }
 
     private fun ensureTestProvider(name: String) {
-        val present = runCatching { lm.getProvider(name) }.getOrNull() != null
-        if (present) {
-            AppLogger.d("provider $name already exists, skipping addTestProvider")
-            return
-        }
-        AppLogger.w("provider $name missing, calling addTestProvider")
+        AppLogger.d("ensureTestProvider $name: attempting add (will ignore 'already exists')")
         try {
             lm.addTestProvider(
                 name,
@@ -94,11 +89,18 @@ class MockLocationManager(private val context: Context) {
             lm.setTestProviderEnabled(name, true)
             AppLogger.i("addTestProvider $name succeeded")
         } catch (e: SecurityException) {
-            AppLogger.e("addTestProvider $name: SecurityException - enable mock locations in Developer Options and pick this app", e)
+            AppLogger.e("addTestProvider $name: SecurityException - this app is not the chosen mock provider", e)
             throw e
         } catch (e: IllegalArgumentException) {
-            AppLogger.e("addTestProvider $name failed (already exists or unknown)", e)
-            throw e
+            val msg = e.message ?: ""
+            if (msg.contains("already exists", ignoreCase = true)) {
+                AppLogger.i("addTestProvider $name: already exists, treating as success")
+                runCatching { lm.setTestProviderEnabled(name, true) }
+                    .onFailure { AppLogger.w("setTestProviderEnabled($name) after already-exists: ${it.message}") }
+            } else {
+                AppLogger.e("addTestProvider $name failed: $msg", e)
+                throw e
+            }
         } catch (e: Throwable) {
             AppLogger.e("addTestProvider $name failed", e)
             throw e
