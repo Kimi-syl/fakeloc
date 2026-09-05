@@ -107,13 +107,15 @@ fun FakeLocScreen(onShowLogs: () -> Unit) {
                     factory = { ctx ->
                         try {
                             val mv = MapView(ctx).apply {
-                                setTileSource(CartoLight)
+                                setTileSource(ArcgisWorldStreet)
                                 setMultiTouchControls(true)
                                 setHorizontalMapRepetitionEnabled(false)
                                 setVerticalMapRepetitionEnabled(false)
                                 isTilesScaledToDpi = true
-                                controller.setZoom(4.0)
+                                controller.setZoom(3.0)
                                 controller.setCenter(GeoPoint(20.0, 0.0))
+
+                                overlays.add(GridOverlay())
 
                                 val tap = MapEventsOverlay(object : MapEventsReceiver {
                                     override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
@@ -134,8 +136,12 @@ fun FakeLocScreen(onShowLogs: () -> Unit) {
                                 })
                                 overlays.add(tap)
                             }
+                            mv.postDelayed({
+                                AppLogger.w("no tiles cached after 5s — tile server likely blocked on this network")
+                                mapError = "Map tiles not loading. Use manual lat/lon below."
+                            }, 5000)
                             mapView = mv
-                            AppLogger.i("MapView created")
+                            AppLogger.i("MapView created (ArcGIS World Street Map)")
                             mv
                         } catch (t: Throwable) {
                             AppLogger.e("MapView factory crashed", t)
@@ -306,12 +312,11 @@ fun FakeLocScreen(onShowLogs: () -> Unit) {
 
 private fun Double.format6(): String = "%.6f".format(this)
 
-private val CartoLight = object : OnlineTileSourceBase(
-    "CartoDB Positron",
+private val ArcgisWorldStreet = object : OnlineTileSourceBase(
+    "ArcGIS World Street Map",
     0, 19, 256, ".png",
-    arrayOf("a.basemaps.cartocdn.com", "b.basemaps.cartocdn.com",
-            "c.basemaps.cartocdn.com", "d.basemaps.cartocdn.com"),
-    "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    arrayOf("server.arcgisonline.com", "services.arcgisonline.com"),
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
     TileSourcePolicy(2, TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
 ) {
     override fun getTileURLString(pMapTileIndex: Long): String {
@@ -319,5 +324,59 @@ private val CartoLight = object : OnlineTileSourceBase(
             .replace("{z}", MapTileIndex.getZoom(pMapTileIndex).toString())
             .replace("{x}", MapTileIndex.getX(pMapTileIndex).toString())
             .replace("{y}", MapTileIndex.getY(pMapTileIndex).toString())
+    }
+}
+
+private class GridOverlay : org.osmdroid.views.overlay.Overlay() {
+    private val paint = android.graphics.Paint().apply {
+        color = android.graphics.Color.argb(120, 80, 80, 80)
+        strokeWidth = 1f
+        style = android.graphics.Paint.Style.STROKE
+    }
+    private val textPaint = android.graphics.Paint().apply {
+        color = android.graphics.Color.argb(180, 60, 60, 60)
+        textSize = 22f
+        isAntiAlias = true
+    }
+
+    override fun draw(c: android.graphics.Canvas, mapView: MapView, shadow: Boolean) {
+        if (shadow) return
+        val projection = mapView.projection
+        val bb = projection.boundingBox
+        if (bb == null) return
+
+        val step = pickStep(bb)
+
+        val startLat = Math.floor(bb.latNorth / step) * step
+        val endLat = Math.floor(bb.latSouth / step) * step
+        var lat = startLat
+        while (lat >= endLat) {
+            val left = projection.toPixels(org.osmdroid.util.GeoPoint(lat, bb.lonWest), null)
+            val right = projection.toPixels(org.osmdroid.util.GeoPoint(lat, bb.lonEast), null)
+            c.drawLine(left.x.toFloat(), left.y.toFloat(),
+                       right.x.toFloat(), right.y.toFloat(), paint)
+            c.drawText("%.0f°".format(lat), left.x.toFloat() + 4f, left.y.toFloat() - 4f, textPaint)
+            lat -= step
+        }
+
+        val startLon = Math.ceil(bb.lonWest / step) * step
+        val endLon = Math.ceil(bb.lonEast / step) * step
+        var lon = startLon
+        while (lon <= endLon) {
+            val top = projection.toPixels(org.osmdroid.util.GeoPoint(bb.latNorth, lon), null)
+            val bot = projection.toPixels(org.osmdroid.util.GeoPoint(bb.latSouth, lon), null)
+            c.drawLine(top.x.toFloat(), top.y.toFloat(),
+                       bot.x.toFloat(), bot.y.toFloat(), paint)
+            c.drawText("%.0f°".format(lon), top.x.toFloat() + 4f, top.y.toFloat() + 18f, textPaint)
+            lon += step
+        }
+    }
+
+    private fun pickStep(bb: org.osmdroid.util.BoundingBox): Double = when {
+        bb.latNorth - bb.latSouth > 90 -> 30.0
+        bb.latNorth - bb.latSouth > 30 -> 10.0
+        bb.latNorth - bb.latSouth > 10 -> 5.0
+        bb.latNorth - bb.latSouth > 3  -> 1.0
+        else -> 0.5
     }
 }

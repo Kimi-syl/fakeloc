@@ -34,7 +34,8 @@ class MockLocationManager(private val context: Context) {
         val names = candidates()
         AppLogger.i("pushLocation: candidate providers=$names")
 
-        return try {
+        var anyOk = false
+        try {
             for (name in names) {
                 ensureTestProvider(name)
                 val loc = Location(name).apply {
@@ -51,21 +52,31 @@ class MockLocationManager(private val context: Context) {
                     lm.setTestProviderEnabled(name, true)
                     lm.setTestProviderLocation(name, loc)
                     AppLogger.d("provider $name updated")
+                    anyOk = true
                 }.onFailure {
                     AppLogger.w("update $name failed: ${it.javaClass.simpleName}: ${it.message}")
                 }
             }
-            true
         } catch (e: SecurityException) {
             AppLogger.e("pushLocation: SecurityException - this app is not the chosen mock provider", e)
-            false
+            return false
         } catch (e: IllegalArgumentException) {
             AppLogger.e("pushLocation: IllegalArgumentException - bad arguments or provider missing", e)
-            false
+            return false
         } catch (e: Throwable) {
             AppLogger.e("pushLocation: unexpected", e)
-            false
+            return false
         }
+
+        if (anyOk) {
+            runCatching {
+                val last = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                AppLogger.i("getLastKnownLocation(gps)=lat=${last?.latitude} lon=${last?.longitude} time=${last?.time}")
+                val lastN = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                AppLogger.i("getLastKnownLocation(network)=lat=${lastN?.latitude} lon=${lastN?.longitude} time=${lastN?.time}")
+            }.onFailure { AppLogger.w("readback failed: ${it.message}") }
+        }
+        return anyOk
     }
 
     private fun candidates(): List<String> {
