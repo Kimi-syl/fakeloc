@@ -32,8 +32,10 @@ import com.example.fakeloc.data.SavedLocationsStore
 import com.example.fakeloc.location.MockLocationManager
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.tileprovider.tilesource.TileSourcePolicy
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
@@ -58,6 +60,8 @@ fun FakeLocScreen() {
     var spoofing by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("") }
     var spotName by remember { mutableStateOf("") }
+    var manualLat by remember { mutableStateOf("") }
+    var manualLon by remember { mutableStateOf("") }
 
     val mapView = remember { MapView(context) }
 
@@ -91,8 +95,11 @@ fun FakeLocScreen() {
                 AndroidView(
                     factory = {
                         mapView.apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
+                            setTileSource(CartoLight)
                             setMultiTouchControls(true)
+                            setHorizontalMapRepetitionEnabled(false)
+                            setVerticalMapRepetitionEnabled(false)
+                            isTilesScaledToDpi = true
                             controller.setZoom(4.0)
                             controller.setCenter(GeoPoint(20.0, 0.0))
 
@@ -172,6 +179,56 @@ fun FakeLocScreen() {
                 ) { Text("Stop") }
             }
 
+            Text("Or enter coordinates manually:",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = manualLat,
+                    onValueChange = { manualLat = it.filter { c -> c.isDigit() || c == '.' || c == '-' } },
+                    label = { Text("Latitude") },
+                    modifier = Modifier.weight(1f)
+                )
+                OutlinedTextField(
+                    value = manualLon,
+                    onValueChange = { manualLon = it.filter { c -> c.isDigit() || c == '.' || c == '-' } },
+                    label = { Text("Longitude") },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        val lat = manualLat.toDoubleOrNull()
+                        val lon = manualLon.toDoubleOrNull()
+                        if (lat != null && lon != null && lat in -90.0..90.0 && lon in -180.0..180.0) {
+                            pickedLat = lat; pickedLon = lon
+                            mapView.controller.setCenter(GeoPoint(lat, lon))
+                            mapView.controller.setZoom(13.0)
+                            mapView.overlays.removeAll { it is Marker }
+                            mapView.overlays.add(
+                                Marker(mapView).apply {
+                                    position = GeoPoint(lat, lon)
+                                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                                    title = "Selected"
+                                }
+                            )
+                            mapView.invalidate()
+                            statusMessage = "Set to $lat, $lon"
+                        } else {
+                            statusMessage = "Invalid coordinates (lat -90..90, lon -180..180)"
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("Set") }
+            }
+
             val saved = remember { store.list() }
             if (saved.isNotEmpty()) {
                 Text("Saved spots:", style = MaterialTheme.typography.titleSmall,
@@ -200,3 +257,18 @@ fun FakeLocScreen() {
 }
 
 private fun Double.format6(): String = "%.6f".format(this)
+
+private val CartoLight = object : OnlineTileSourceBase(
+    "CartoDB Positron",
+    0, 19, 256, ".png",
+    arrayOf("a.basemaps.cartocdn.com", "b.basemaps.cartocdn.com", "c.basemaps.cartocdn.com", "d.basemaps.cartocdn.com"),
+    "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+    TileSourcePolicy(2, TileSourcePolicy.FLAG_USER_AGENT_MEANINGFUL)
+) {
+    override fun getTileURLString(pMapTileIndex: Long): String {
+        return baseUrl
+            .replace("{z}", MapTileIndex.getZoom(pMapTileIndex).toString())
+            .replace("{x}", MapTileIndex.getX(pMapTileIndex).toString())
+            .replace("{y}", MapTileIndex.getY(pMapTileIndex).toString())
+    }
+}
