@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FakeLoc</string>
+    <string name="status_idle">Idle — pick a spot on the map</string>
+    <string name="status_active">Spoofing location</string>
+    <string name="status_no_mock">Mock locations not enabled</string>
+    <string name="action_start">Start spoofing</string>
+    <string name="action_stop">Stop spoofing</string>
+    <string name="action_save">Save</string>
+    <string name="hint_pick">Tap the map, then press Start</string>
+</resources>
